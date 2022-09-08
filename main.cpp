@@ -8,8 +8,8 @@
 const TGAColor white = TGAColor(255, 255, 255, 255);
 const TGAColor red   = TGAColor(255, 0,   0,   255);
 const TGAColor green = TGAColor(0,   255, 0,   255);
-const int width  = 800;
-const int height = 800;
+const int width  = 1024;
+const int height = 1024;
 Model *model = NULL;
 
 void line(Vec2i p0, Vec2i p1, TGAImage &image, TGAColor color) {
@@ -92,84 +92,104 @@ void triangle_line(Vec2i t0, Vec2i t1, Vec2i t2, TGAImage &image, TGAColor color
 	}
 }
 
-Vec3f barycentric(Vec2i *pts, Vec2i P) { 
-    Vec3f u = Vec3f(pts[2].x-pts[0].x, pts[1].x-pts[0].x, pts[0].x-P.x)^Vec3f(pts[2].y-pts[0].y, pts[1].y-pts[0].y, pts[0].y-P.y);
-    /* `pts` and `P` has integer value as coordinates
-       so `abs(u[2])` < 1 means `u[2]` is 0, that means
-       triangle is degenerate, in this case return something with negative coordinates */
-    if (std::abs(u.z)<1) return Vec3f(-1,1,1);
-    return Vec3f(1.f-(u.x+u.y)/u.z, u.y/u.z, u.x/u.z); 
+Vec3f barycentric(Vec3f A, Vec3f B, Vec3f C, Vec3f P) { 
+    Vec3f s[2];
+	// The original for (int i = 2; i--; ) is quite clever but I changed it to a more common one
+    for (int i = 1; i >= 0; i--) {
+        s[i][0] = C[i]-A[i];
+        s[i][1] = B[i]-A[i];
+        s[i][2] = A[i]-P[i];
+    }
+    Vec3f u = cross(s[0], s[1]);
+	// If u[2] is zero then AC and AB form an angle of 0 degree so that sin(0) = 0, which means triangle ABC is degenerate
+    if (std::abs(u[2])>1e-2)
+        return Vec3f(1.f-(u.x+u.y)/u.z, u.y/u.z, u.x/u.z);
+	// If triangle ABC is degenerate generate negative coordinates, it will be thrown away by the rasterizator
+    return Vec3f(-1,1,1); 
 } 
 
-void triangle(Vec2i *pts, TGAImage &image, TGAColor color) { 
-    Vec2i bboxmin(image.get_width()-1,  image.get_height()-1); 
-    Vec2i bboxmax(0, 0); 
-    Vec2i clamp(image.get_width()-1, image.get_height()-1); 
-    for (int i=0; i<3; i++) { 
-        bboxmin.x = std::max(0, std::min(bboxmin.x, pts[i].x));
-		bboxmin.y = std::max(0, std::min(bboxmin.y, pts[i].y));
+void triangle(Vec3f *pts, Vec3f *tex, float *zbuffer, TGAImage &image, TGAImage &texture, float intensity) { 
+    Vec2f bboxmin( std::numeric_limits<float>::max(),  std::numeric_limits<float>::max());
+    Vec2f bboxmax(-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max());
+    Vec2f clamp(image.get_width()-1, image.get_height()-1);
+    for (int i=0; i<3; i++) {
+        for (int j=0; j<2; j++) {
+            bboxmin[j] = std::max(0.f,      std::min(bboxmin[j], pts[i][j]));
+            bboxmax[j] = std::min(clamp[j], std::max(bboxmax[j], pts[i][j]));
+        }
+    }
 
-		bboxmax.x = std::min(clamp.x, std::max(bboxmax.x, pts[i].x));
-		bboxmax.y = std::min(clamp.y, std::max(bboxmax.y, pts[i].y));
-    } 
+	TGAColor textureColor;
+	Vec3f P;
+	Vec2f Ptex(0,0);
+	for (P.x=bboxmin.x; P.x<=bboxmax.x; P.x++) {
+        for (P.y=bboxmin.y; P.y<=bboxmax.y; P.y++) {
+            Vec3f bc_screen  = barycentric(pts[0], pts[1], pts[2], P);
+            if (bc_screen.x<0 || bc_screen.y<0 || bc_screen.z<0) continue;
+            
+			P.z = 0;
+			Ptex.x = 0;
+			Ptex.y = 0;
+            for (int i=0; i<3; i++) {
+				P.z += pts[i][2]*bc_screen[i];
+				Ptex.x += tex[i][0] * (bc_screen[i]);
+				Ptex.y += tex[i][1] * (bc_screen[i]);
+			}
 
-    Vec2i P; 
-    for (P.x=bboxmin.x; P.x<=bboxmax.x; P.x++) { 
-        for (P.y=bboxmin.y; P.y<=bboxmax.y; P.y++) { 
-            Vec3f bc_screen  = barycentric(pts, P); 
-            if (bc_screen.x < 0 || bc_screen.y < 0 || bc_screen.z < 0) continue; 
-            image.set(P.x, P.y, color); 
+			if (zbuffer[int(P.x+P.y*width)]<P.z) {
+                zbuffer[int(P.x+P.y*width)] = P.z;
+				textureColor = texture.get(int(Ptex.x*1024), int(Ptex.y*1024));
+                image.set(P.x, P.y, TGAColor(textureColor.r*intensity, textureColor.g*intensity, textureColor.b*intensity));
+            }
         }
     } 
 } 
 
+Vec3f world2screen(Vec3f v) {
+    return Vec3f(int((v.x+1.)*width/2.+.5), int((v.y+1.)*height/2.+.5), v.z);
+}
+
 int main(int argc, char** argv) {
-
-
-    TGAImage image(width, height, TGAImage::RGB); 
-	
 	if (2==argc) {
         model = new Model(argv[1]);
     } else {
         model = new Model("obj/african_head.obj");
     }
 
-	for (int i=0; i<model->nfaces(); i++) { 
-		std::vector<int> face = model->face(i); 
-		Vec2i screen_coords[3]; 
-		for (int j=0; j<3; j++) { 
-			Vec3f world_coords = model->vert(face[j]); 
-			screen_coords[j] = Vec2i((world_coords.x+1.)*width/2., (world_coords.y+1.)*height/2.); 
-		} 
-		triangle(screen_coords, image, TGAColor(rand()%255, rand()%255, rand()%255, 255)); 
-	}
+    float *zbuffer = new float[width*height];
+    for (int i=width*height; i--; zbuffer[i] = -std::numeric_limits<float>::max());
 
-	// define light_dir
-	Vec3f light_dir(0,0,-1); 
-	for (int i=0; i<model->nfaces(); i++) { 
-		std::vector<int> face = model->face(i); 
-		Vec2i screen_coords[3]; 
-		Vec3f world_coords[3]; 
-		for (int j=0; j<3; j++) { 
-			Vec3f v = model->vert(face[j]); 
-			screen_coords[j] = Vec2i((v.x+1.)*width/2., (v.y+1.)*height/2.); 
-			world_coords[j]  = v; 
-		} 
-		Vec3f n = (world_coords[2]-world_coords[0])^(world_coords[1]-world_coords[0]); 
+    TGAImage image(width, height, TGAImage::RGB);
+	TGAImage texture(1024, 1024, TGAImage::RGB);
+	texture.read_tga_file("obj/african_head_diffuse.tga");
+	texture.flip_vertically();
+	Vec3f light_dir(0,0,-1);
+	int count = 0;
+
+    for (int i=0; i<model->nfaces(); i++) {
+        std::vector<int> face = model->face(i);
+        Vec3f pts[3];
+		Vec3f tex[3];
+		Vec3f world_coords[3];
+        for (int j=0; j<3; j++) {
+			Vec3f v = model->vert(face[j*3]); 
+			Vec3f vt = model->vt(face[j*3+1]);
+		   
+			pts[j] = world2screen(v);
+			tex[j] = vt;
+			world_coords[j]  = v;
+		}
+		
+		// Triangle Normal
+		Vec3f n = cross((world_coords[2]-world_coords[0]),(world_coords[1]-world_coords[0])); 
 		n.normalize(); 
-		float intensity = n*light_dir; 
-		if (intensity>0) { 
-			triangle(screen_coords, image, TGAColor(intensity*255, intensity*255, intensity*255, 255)); 
-		} 
-	}
 
-    // Vec2i t0[3] = {Vec2i(10, 70),   Vec2i(50, 160),  Vec2i(70, 80)};
-    // Vec2i t1[3] = {Vec2i(180, 50),  Vec2i(150, 1),   Vec2i(70, 180)};
-    // Vec2i t2[3] = {Vec2i(180, 150), Vec2i(120, 160), Vec2i(130, 180)};
-
-    // triangle(t0, image, red);
-    // triangle(t1, image, white);
-    // triangle(t2, image, green);
+		float intensity = n*light_dir;
+		if (intensity>0) {
+			std::cout << intensity << std::endl;
+			triangle(pts, tex, zbuffer, image, texture, intensity);
+		}
+    }
 
     image.flip_vertically();
     image.write_tga_file("output.tga");
