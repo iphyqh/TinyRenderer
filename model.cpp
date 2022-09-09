@@ -20,6 +20,7 @@ Model::Model(const char *filename) : verts_(), faces_(), norms_(), uv_() {
             for (int i=0;i<3;i++) iss >> v[i];
             verts_.push_back(v);
         } else if (!line.compare(0, 3, "vn ")) {
+            // Two spaces instead of one as in v;
             iss >> trash >> trash;
             Vec3f n;
             for (int i=0;i<3;i++) iss >> n[i];

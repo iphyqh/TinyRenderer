@@ -57,6 +57,11 @@ struct TGAColor {
 		}
 		return *this;
 	}
+
+	TGAColor scale(const float scalar) {
+		return TGAColor(r*scalar,g*scalar,b*scalar,a*scalar);
+	}
+
 };
 
 

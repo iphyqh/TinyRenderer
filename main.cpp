@@ -140,6 +140,9 @@ Vec3f barycentric(Vec3f A, Vec3f B, Vec3f C, Vec3f P) {
 } 
 
 void triangle(Vec3f *pts, Vec2i *uv, float *zbuffer, TGAImage &image, float intensity) { 
+	// https://www.scratchapixel.com/lessons/3d-basic-rendering/rasterization-practical-implementation/perspective-correct-interpolation-vertex-attributes
+	// The above post explains why we cannot use the old barycentric coordinate interpolation, despite that I tried in futile, the line sweeping approach
+	// below should be the right way to do it.
 	Vec3i t0 = pts[0];
 	Vec3i t1 = pts[1];
 	Vec3i t2 = pts[2];
@@ -150,7 +153,7 @@ void triangle(Vec3f *pts, Vec2i *uv, float *zbuffer, TGAImage &image, float inte
     if (t0.y>t1.y) { std::swap(t0, t1); std::swap(uv0, uv1); }
     if (t0.y>t2.y) { std::swap(t0, t2); std::swap(uv0, uv2); }
     if (t1.y>t2.y) { std::swap(t1, t2); std::swap(uv1, uv2); }
-	int pointCount = 0;
+
     int total_height = t2.y-t0.y;
     for (int i=0; i<total_height; i++) {
         bool second_half = i>t1.y-t0.y || t1.y==t0.y;
@@ -170,11 +173,11 @@ void triangle(Vec3f *pts, Vec2i *uv, float *zbuffer, TGAImage &image, float inte
             if (zbuffer[idx]<P.z) {
                 zbuffer[idx] = P.z;
                 TGAColor color = model->diffuse(uvP);
-                image.set(P.x, P.y, TGAColor(color.r*intensity, color.g*intensity, color.b*intensity));
-				pointCount++;
+                image.set(P.x, P.y, color.scale(intensity));
             }
         }
     }
+
 } 
 
 Vec3f world2screen(Vec3f v) {
@@ -204,9 +207,13 @@ int main(int argc, char** argv) {
 		Vec3f tex[3];
 		Vec3f world_coords[3];
 		Vec3f screen_coords[3];
+
         for (int j=0; j<3; j++) {
 			Vec3f v = model->vert(face[j]); 
-		  	screen_coords[j] =  m2v(ViewPort*Projection*v2m(v));
+		  	
+			// Changed from orthogonal projection to perspective projection for a camera fixied on a position on z axis.
+			screen_coords[j] =  m2v(ViewPort*Projection*v2m(v)); 
+
 			world_coords[j]  = v;
 		}
 		
