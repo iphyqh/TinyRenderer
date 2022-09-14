@@ -61,7 +61,9 @@ struct TGAColor {
 	TGAColor scale(float intensity) const {
         TGAColor res = *this;
 		// The following line is due to unsigned conversion from ‘int’ to ‘unsigned char’, for example,  
-		// ‘-257’ can be changed to ‘255’, '-256' to '0' and etc.
+		// ‘-257’ can be changed to ‘255’, '-256' to '0', '255' to '1' and etc. The conversion is based
+		// on the binary representations of the two values (regardless of their types). One can test it
+		// on https://onlinetoolz.net/unsigned-signed
         intensity = (intensity<0.f?0.f:(intensity));
         return TGAColor(r*intensity,g*intensity,b*intensity,a*intensity);
         return res;
