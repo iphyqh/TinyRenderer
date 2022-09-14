@@ -58,9 +58,14 @@ struct TGAColor {
 		return *this;
 	}
 
-	TGAColor scale(const float scalar) {
-		return TGAColor(r*scalar,g*scalar,b*scalar,a*scalar);
-	}
+	TGAColor scale(float intensity) const {
+        TGAColor res = *this;
+		// The following line is due to unsigned conversion from ‘int’ to ‘unsigned char’, for example,  
+		// ‘-257’ can be changed to ‘255’, '276' to '0' and etc.
+        intensity = (intensity<0.f?0.f:(intensity));
+        return TGAColor(r*intensity,g*intensity,b*intensity,a*intensity);
+        return res;
+    }
 
 };
 
